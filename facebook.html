@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<!--
+Coded by Liran Yehudar; Michael Sabbah; Naor Dahan;
+-->
+<html>
+	<head>
+		<link href="https://fonts.googleapis.com/css?family=Catamaran:100,200,300,400,500,600,700" rel="stylesheet">
+		<style>
+
+			body{
+				font-family: 'Catamaran';
+				margin:0;
+				padding:0;
+			}
+			
+			h1{
+				font-size:60px;
+				font-weight:200;
+			}
+			
+			.main-login{
+				background-image: url("jumborton2.jpg");
+				width: 100%;
+				text-align: center;
+			}
+
+			.login-header {
+			  padding: 10px;
+			  font-weight:100;
+			  font-size:25px;
+			}
+
+			.login-button-section {
+				padding-bottom:20px;
+			}
+
+			.stats {
+				visibility: hidden;
+				width: 100%;
+				text-align: center;
+				background-image:url("tableBackground.jpg");
+			}
+
+			table {
+				margin: auto;
+				width: 100%;
+			
+			}
+
+
+			th {
+				height: 50px;
+			}
+			
+			#categories{
+				font-size:20px;
+				font-weight:200;
+			}
+			
+			#values{
+				font-size:17px;
+			}
+			
+			#header-day{
+				font-size:35px;
+				font-weight:500;
+			}
+			
+			#header-score{
+				font-size:30px;
+				font-weight:300;
+			}
+
+      #search-id{
+        visibility: hidden;
+        text-align: center;
+        font-size:30px;
+				font-weight:300;
+      }
+			
+		</style>
+	</head>
+  <body>
+      <div class=main-login>
+        <h1>Find your best day in facebook</h1>
+        <div class="login-header">Please login to facebook</div>
+        <div class="login-button-section">
+          <fb:login-button size="xlarge"
+            scope="public_profile,email,user_posts,user_likes"
+            onlogin="checkLoginState();">
+          </fb:login-button>
+        </div>
+      </div>
+      <div id="search-id">Searching...</div>
+      <div class="stats" id="stats-id"> 
+          <div class="your-day">
+            <h2 id="header-day"></h2>
+            <h2 id="header-score"></h2>
+          </div>
+          <table id="table">
+              <tr id="categories">
+                <th>Date</th>
+                <th>Comments Counts</th>
+                <th>Likes Counts</th>
+                <th>Reactions Counts</th>
+                <th>Shares Counts</th>
+              </tr>
+              <tr id="values">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+              </tr>
+            </table>
+      </div>
+		<script>
+            window.fbAsyncInit = function() {
+              FB.init({
+                appId      : 'app-id', // have to add your app-id
+                cookie     : true,
+                xfbml      : true,
+                version    : 'version' // have to add your version
+              });
+    
+              FB.getLoginStatus(function(response) {
+	          	  statusChangeCallback(response);
+	            });
+	
+              FB.AppEvents.logPageView();   
+      
+           };
+
+          (function(d, s, id){
+            var js, fjs = d.getElementsByTagName(s)[0];
+            if (d.getElementById(id)) {return;}
+            js = d.createElement(s); js.id = id;
+            js.src = "https://connect.facebook.net/en_US/sdk.js";
+            fjs.parentNode.insertBefore(js, fjs);
+          }(document, 'script', 'facebook-jssdk'));
+            
+          function checkLoginState() {
+            FB.getLoginStatus(function(response) {
+            statusChangeCallback(response);
+            });
+          }
+
+          function statusChangeCallback(response){
+            console.info(response);
+            if(response.status =='connected'){
+                document.getElementById("search-id").style.visibility = 'visible';
+                FB.api(
+                  '/me/posts',
+                  'GET',
+                  {"fields":"name,comments.summary(true),shares,likes.summary(true),type,reactions,created_time"},
+                  calculateValuePerDay
+                );
+            }
+          }
+
+          function calculateValuePerDay(response) {
+            //weights verctor
+            var weigthsMap = {'likes':0.05,'reactions':0.1,'comments':0.3,'shares':0.05};
+            // map - key is data format, and value is objects of variables
+            var dayMap = new Object();
+            
+            for(var i in response.data){
+              
+              var post = response.data[i];
+              var date = post.created_time.substring(0, 10); // export date format as: yy-mm-dd
+              var total_post_score = 0;
+
+              //Calculate score of each criterion for current post
+              var total_likes = calcNumOfLikes(post);
+              var total_reactions = calcNumOfReactions(post);
+              var total_comments = calcWightOfComments(post);
+              var total_shares = calcWightOfShares(post);
+              
+              //Calculate total varaibles score verctor * weigths vector
+              total_post_score = total_likes*weigthsMap.likes + total_reactions * weigthsMap.reactions 
+                                 + total_comments* weigthsMap.comments + total_shares* weigthsMap.shares;
+              
+              //Calculate score by type
+              total_post_score *= calcTypeWeight(post);
+              
+              
+              //Add post date with it's score to map
+              if(dayMap[date]){
+                dayMap[date].total_post_score += total_post_score;
+                dayMap[date].total_likes += total_likes;
+                dayMap[date].total_reactions += total_reactions;
+                dayMap[date].total_comments += total_comments;
+                dayMap[date].total_shares += total_shares;
+              }
+              else{
+                variablesCounts ={
+                      'total_post_score':total_post_score,
+                      'total_likes':total_likes,
+                      'total_reactions':total_reactions,
+                      'total_comments':total_comments,
+                      'total_shares':total_shares
+                    };
+                dayMap[date] = variablesCounts;
+              } 
+            }
+            
+            // get the best day from the map by max score.
+            var bestDay = findBestDay(dayMap);
+
+            //display result data to UI
+            displayData(dayMap,bestDay);
+          }
+          
+          function calcNumOfLikes(post){
+            if(post.likes){
+              return post.likes.summary.total_count;
+            }else{
+              return 0;
+            }
+          }
+          
+          function calcNumOfReactions(post){
+            var num_of_reactions = 0;
+            if(post.id.reactions){
+              if(reactions.type(LOVE)){
+                num_of_reactions += post.id.reactions.type(LOVE).summary(total_count).limit(0).as(love);
+              }
+              if(reactions.type(WOW)){
+                num_of_reactions += post.id.reactions.type(WOW).summary(total_count).limit(0).as(wow);
+              }
+              if(reactions.type(HAHA)){
+                num_of_reactions += post.id.reactions.type(HAHA).summary(total_count).limit(0).as(haha);
+              }
+            }
+            return num_of_reactions;
+          }
+          
+          function calcWightOfComments(post){
+            if(post.comments.summary.total_count){
+              return post.comments.summary.total_count;
+            }else{
+              return 0;
+            }
+          }
+          
+          function calcWightOfShares(post){
+            if(post.shares){
+              return post.shares.count;
+            }else{
+              return 0;
+            }
+          }
+          
+          function calcTypeWeight(post){
+            switch(post.type){
+              case "status":
+                return 1;
+                break;
+              case "link":
+                return 1;
+                break;
+              case "offer":
+                return 1;
+                break;
+              case "photo":
+                return 1.5;
+                break;
+              case "video":
+                return 2;
+              default:
+                return 1;
+                break;
+            }
+          }
+          
+          function findBestDay(map){	
+            var bestDay = "";
+            var bestDayScore = 0;
+            for(var key in map) {
+              if(map[key].total_post_score > bestDayScore){
+                bestDayScore = map[key].total_post_score;
+                bestDay = key;
+              }
+            }
+            return bestDay;
+          }
+          
+          function displayData(dataMap,bestDay) {
+              // gets html elements
+              var table = document.getElementById("table");
+              var headerDay = document.getElementById("header-day");
+              var headerScore = document.getElementById("header-score");
+              var divTag = document.getElementById("stats-id");
+              var scoreAfterCutting = dataMap[bestDay].total_post_score.toFixed(2);
+              
+              // set headers
+              headerScore.innerHTML  = "Score: " + scoreAfterCutting; 
+              headerDay.innerHTML  = "Your Best day in Facebook is " + bestDay;
+			   
+              // populate table 
+              table.rows[1].cells[0].innerHTML =  bestDay;
+              table.rows[1].cells[1].innerHTML =  dataMap[bestDay].total_comments;
+              table.rows[1].cells[2].innerHTML =  dataMap[bestDay].total_likes;;
+              table.rows[1].cells[3].innerHTML =  dataMap[bestDay].total_reactions;
+              table.rows[1].cells[4].innerHTML =  dataMap[bestDay].total_shares;
+
+              // visble the table container of stats
+              document.getElementById("search-id").style.visibility = 'hidden';
+              divTag.style.visibility = 'visible';
+          }
+		</script>
+		
+</body>
+</html>
+
